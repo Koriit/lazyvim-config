@@ -1,18 +1,18 @@
 #!/bin/bash
 
-# Kai Neovim Enhancement Script with Intelligent Action Detection
-# Usage: kai-neovim.sh <context_file> <prompt>
+# Claude Neovim Enhancement Script with Intelligent Action Detection
+# Usage: claude.sh <context_file> <prompt>
 
 CONTEXT_FILE="$1"
 PROMPT="$2"
 
-# Check if claude CLI is available (we use it to communicate with Kai)
+# Check if claude CLI is available
 if ! command -v claude &>/dev/null; then
   echo "Error: Claude CLI not found. Please install it first."
   exit 1
 fi
 
-# Read the CLAUDE.md files for additional context (project-specific rules for Kai)
+# Read the CLAUDE.md files for additional context (project-specific rules)
 GLOBAL_CLAUDE_MD=""
 LOCAL_CLAUDE_MD=""
 
@@ -30,8 +30,8 @@ while [ "$CURRENT_DIR" != "/" ]; do
   CURRENT_DIR=$(dirname "$CURRENT_DIR")
 done
 
-# Regular text enhancement request - let Kai determine the action
-FULL_PROMPT="You are Kai, an AI assistant integrated into Neovim. 
+# Regular text enhancement request - let Claude determine the action
+FULL_PROMPT="You are Claude, an AI assistant integrated into Neovim.
 
 CRITICAL CONTEXT FROM CLAUDE.md FILES (FOLLOW THESE RULES EXACTLY):
 ==================================================
@@ -71,12 +71,12 @@ IMPORTANT INSTRUCTIONS:
 - Follow ALL formatting rules from CLAUDE.md
 - Maintain the code style and conventions of the file
 - Consider the context when generating content
-- You are Kai, the AI assistant integrated into Neovim
+- You are Claude, the AI assistant integrated into Neovim
 
 User instruction: $PROMPT"
 
 # Get the response with action marker
-RESPONSE=$(echo "$FULL_PROMPT" | claude -p) # Using claude CLI to communicate with Kai
+RESPONSE=$(echo "$FULL_PROMPT" | claude -p)
 
 # Output the response
 echo "$RESPONSE"
