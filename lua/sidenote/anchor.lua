@@ -55,7 +55,9 @@ local function build_joined(lines, from_idx, to_idx)
     table.insert(pieces, lt)
     offset = offset + #lt + 1 -- + 1 for the joining "\n"
   end
-  -- Sentinel so col math at the very end is safe; never indexed past last line.
+  -- Lines joined by '\n' (no trailing newline). offset_to_line_col uses bisect
+  -- on line_starts; offsets at end-of-string map to the last line's exclusive
+  -- end column.
   local joined = table.concat(pieces, "\n")
   return joined, line_starts
 end
@@ -104,8 +106,9 @@ end
 
 local function stage1_neighborhood_multiline(lines, comment, needle, hash)
   local total = #lines
+  local needle_lines = 1 + select(2, needle:gsub("\n", "\n"))
   local from = math.max(0, comment.startLine - 10)
-  local to = math.min(total - 1, (comment.endLine or comment.startLine) + 10)
+  local to = math.min(total - 1, (comment.endLine or comment.startLine) + needle_lines + 10)
   if to < from then
     return nil
   end
@@ -178,17 +181,6 @@ local function stage2_full_scan_multiline(lines, comment, needle, hash)
   local joined, line_starts = build_joined(lines, 0, #lines - 1)
   local joined_len = #joined
   local base_len = #needle
-  local lengths = { base_len }
-  local lo = math.floor(0.8 * base_len)
-  local hi = math.ceil(1.2 * base_len)
-  if lo < 1 then
-    lo = 1
-  end
-  for n = lo, hi do
-    if n ~= base_len then
-      table.insert(lengths, n)
-    end
-  end
 
   local best = nil
   local match_with_length = function(window_len)
@@ -215,12 +207,7 @@ local function stage2_full_scan_multiline(lines, comment, needle, hash)
     end
   end
 
-  for _, n in ipairs(lengths) do
-    match_with_length(n)
-    if best ~= nil and n == base_len then
-      return best
-    end
-  end
+  match_with_length(base_len)
   return best
 end
 
@@ -234,17 +221,6 @@ local function stage2_full_scan(lines, comment)
     return stage2_full_scan_multiline(lines, comment, needle, hash)
   end
   local base_len = #needle
-  local lengths = { base_len }
-  local lo = math.floor(0.8 * base_len)
-  local hi = math.ceil(1.2 * base_len)
-  if lo < 1 then
-    lo = 1
-  end
-  for n = lo, hi do
-    if n ~= base_len then
-      table.insert(lengths, n)
-    end
-  end
 
   local best = nil
   local match_with_length = function(window_len)
@@ -271,12 +247,7 @@ local function stage2_full_scan(lines, comment)
     end
   end
 
-  for _, n in ipairs(lengths) do
-    match_with_length(n)
-    if best ~= nil and n == base_len then
-      return best
-    end
-  end
+  match_with_length(base_len)
   return best
 end
 

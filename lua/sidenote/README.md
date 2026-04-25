@@ -73,9 +73,9 @@ comment for that file is re-resolved:
 1. **Neighborhood + hash verify** — search ±10 lines around
    `startLine` for a literal match of `selectedText`; accept only if
    the match's SHA-256 equals `selectedTextHash`. Closest hit wins.
-2. **Full-file hash scan** — sliding-window hashes across every line
-   with length tolerance ±20%. On match, `selectedText` is rewritten
-   to the new substring (so anchors survive small edits).
+2. **Full-file hash scan** — sliding-window hashes across every line.
+   On match, `selectedText` is rewritten to the new substring (so
+   anchors survive small edits).
 3. **Regex fallback** — only for legacy comments without a hash.
    Hashed comments that lose their hash match are flagged
    `isOrphaned`, never silently re-bound.
@@ -85,8 +85,9 @@ preserving embedded `\n` and `endLine` distinct from `startLine`.
 This is **less broken** than upstream Obsidian SideNote — its
 re-resolution stages collapse `endLine` to `startLine` on every save,
 which orphans multi-line notes after the first write. Sidenote.nvim's
-resolver scans the joined neighborhood / full file content so
-multi-line anchors survive.
+Stage 1 catches nearby cases by extending the joined neighborhood to
+cover the needle's line span; Stage 2 (on save) does the heavy lifting
+for widely-collapsed multi-line notes by hashing across the full file.
 
 The browse preview runs only Stage 1 to keep the UI responsive.
 Stage 2 happens on save where a brief blip is acceptable.
