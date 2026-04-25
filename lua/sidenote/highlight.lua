@@ -95,13 +95,29 @@ function M.render(bufnr, comments, opts)
   for _, c in ipairs(comments or {}) do
     local hide = c.isOrphaned == true or (c.resolved == true and not show_resolved)
     if not hide then
-      local line = c.startLine
-      if line and line >= 0 and line < line_count then
-        local end_line = c.startLine
+      local start_row = c.startLine
+      if start_row and start_row >= 0 and start_row < line_count then
+        local end_row = c.endLine or start_row
+        if end_row < start_row then
+          end_row = start_row
+        end
+        if end_row > line_count - 1 then
+          end_row = line_count - 1
+        end
         local start_col = math.max(0, c.startChar or 0)
-        local end_col = math.max(start_col, c.endChar or start_col)
-        pcall(vim.api.nvim_buf_set_extmark, bufnr, namespace, line, start_col, {
-          end_row = end_line,
+        local end_col = c.endChar or start_col
+        if end_row == start_row and end_col < start_col then
+          end_col = start_col
+        end
+        local end_line_text = vim.api.nvim_buf_get_lines(bufnr, end_row, end_row + 1, false)[1] or ""
+        if end_col > #end_line_text then
+          end_col = #end_line_text
+        end
+        if end_col < 0 then
+          end_col = 0
+        end
+        pcall(vim.api.nvim_buf_set_extmark, bufnr, namespace, start_row, start_col, {
+          end_row = end_row,
           end_col = end_col,
           hl_group = HL_GROUP,
           hl_mode = "combine",

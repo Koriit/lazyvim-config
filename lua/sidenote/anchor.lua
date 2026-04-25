@@ -41,11 +41,108 @@ local function utf8_safe_substring(line, start_byte, length)
   return string.sub(line, start_byte + 1, start_byte + length)
 end
 
+-- Build a contiguous joined string from `lines[from_idx + 1 .. to_idx + 1]`
+-- (0-indexed `from_idx`/`to_idx` for callers' convenience). Also returns a
+-- `line_starts` array where `line_starts[k]` is the 1-indexed byte offset of
+-- the k-th line's start within the joined string. Lines are joined with `\n`.
+local function build_joined(lines, from_idx, to_idx)
+  local pieces = {}
+  local line_starts = {}
+  local offset = 1 -- 1-indexed byte offset
+  for i = from_idx, to_idx do
+    table.insert(line_starts, offset)
+    local lt = lines[i + 1] or ""
+    table.insert(pieces, lt)
+    offset = offset + #lt + 1 -- + 1 for the joining "\n"
+  end
+  -- Sentinel so col math at the very end is safe; never indexed past last line.
+  local joined = table.concat(pieces, "\n")
+  return joined, line_starts
+end
+
+-- bisect_right: largest index k such that line_starts[k] <= offset.
+local function locate_offset(line_starts, offset)
+  -- Binary search for the rightmost line_starts[k] <= offset.
+  local lo, hi = 1, #line_starts
+  while lo < hi do
+    local mid = math.floor((lo + hi + 1) / 2)
+    if line_starts[mid] <= offset then
+      lo = mid
+    else
+      hi = mid - 1
+    end
+  end
+  return lo
+end
+
+-- Convert a 1-indexed byte offset within a joined string back to (line_idx, col)
+-- where `line_idx` is the absolute 0-indexed line in the original `lines` table
+-- (caller supplies `from_idx` so we know the absolute base) and `col` is the
+-- 0-indexed byte column within that line.
+local function offset_to_line_col(line_starts, offset, from_idx)
+  local k = locate_offset(line_starts, offset)
+  local col = offset - line_starts[k]
+  return from_idx + (k - 1), col
+end
+
+local function find_all_plain(haystack, needle)
+  local positions = {}
+  if needle == "" then
+    return positions
+  end
+  local start = 1
+  while true do
+    local s, e = string.find(haystack, needle, start, true)
+    if not s then
+      break
+    end
+    table.insert(positions, { start_byte = s, end_byte = e })
+    start = s + 1
+  end
+  return positions
+end
+
+local function stage1_neighborhood_multiline(lines, comment, needle, hash)
+  local total = #lines
+  local from = math.max(0, comment.startLine - 10)
+  local to = math.min(total - 1, (comment.endLine or comment.startLine) + 10)
+  if to < from then
+    return nil
+  end
+  local joined, line_starts = build_joined(lines, from, to)
+  local positions = find_all_plain(joined, needle)
+  local best = nil
+  for _, pos in ipairs(positions) do
+    local snippet = string.sub(joined, pos.start_byte, pos.end_byte)
+    if sha256(snippet) == hash then
+      local sline, scol = offset_to_line_col(line_starts, pos.start_byte, from)
+      -- end_byte is inclusive in find()'s return; converting offset+1 gives the
+      -- exclusive end position for our (line, col) pair.
+      local eline, ecol = offset_to_line_col(line_starts, pos.end_byte + 1, from)
+      local d = distance(sline, scol, comment.startLine, comment.startChar or 0)
+      if best == nil or d < best.distance then
+        best = {
+          startLine = sline,
+          startChar = scol,
+          endLine = eline,
+          endChar = ecol,
+          selectedText = snippet,
+          distance = d,
+        }
+      end
+    end
+  end
+  return best
+end
+
 local function stage1_neighborhood(lines, comment)
   local needle = comment.selectedText
   local hash = comment.selectedTextHash
   if not needle or needle == "" or not hash then
     return nil
+  end
+  if string.find(needle, "\n", 1, true) then
+    return stage1_neighborhood_multiline(lines, comment, needle, hash)
   end
   local total = #lines
   local from = math.max(0, comment.startLine - 10)
@@ -74,11 +171,67 @@ local function stage1_neighborhood(lines, comment)
   return best
 end
 
+local function stage2_full_scan_multiline(lines, comment, needle, hash)
+  if #lines == 0 then
+    return nil
+  end
+  local joined, line_starts = build_joined(lines, 0, #lines - 1)
+  local joined_len = #joined
+  local base_len = #needle
+  local lengths = { base_len }
+  local lo = math.floor(0.8 * base_len)
+  local hi = math.ceil(1.2 * base_len)
+  if lo < 1 then
+    lo = 1
+  end
+  for n = lo, hi do
+    if n ~= base_len then
+      table.insert(lengths, n)
+    end
+  end
+
+  local best = nil
+  local match_with_length = function(window_len)
+    if window_len > joined_len then
+      return
+    end
+    for start = 1, joined_len - window_len + 1 do
+      local snippet = string.sub(joined, start, start + window_len - 1)
+      if sha256(snippet) == hash then
+        local sline, scol = offset_to_line_col(line_starts, start, 0)
+        local eline, ecol = offset_to_line_col(line_starts, start + window_len, 0)
+        local d = distance(sline, scol, comment.startLine, comment.startChar or 0)
+        if best == nil or d < best.distance then
+          best = {
+            startLine = sline,
+            startChar = scol,
+            endLine = eline,
+            endChar = ecol,
+            selectedText = snippet,
+            distance = d,
+          }
+        end
+      end
+    end
+  end
+
+  for _, n in ipairs(lengths) do
+    match_with_length(n)
+    if best ~= nil and n == base_len then
+      return best
+    end
+  end
+  return best
+end
+
 local function stage2_full_scan(lines, comment)
   local needle = comment.selectedText
   local hash = comment.selectedTextHash
   if not needle or needle == "" or not hash then
     return nil
+  end
+  if string.find(needle, "\n", 1, true) then
+    return stage2_full_scan_multiline(lines, comment, needle, hash)
   end
   local base_len = #needle
   local lengths = { base_len }
@@ -131,6 +284,25 @@ local function stage3_regex(lines, comment)
   local needle = comment.selectedText
   if not needle or needle == "" then
     return nil
+  end
+  if string.find(needle, "\n", 1, true) then
+    if #lines == 0 then
+      return nil
+    end
+    local joined, line_starts = build_joined(lines, 0, #lines - 1)
+    local s, e = string.find(joined, needle, 1, true)
+    if not s then
+      return nil
+    end
+    local sline, scol = offset_to_line_col(line_starts, s, 0)
+    local eline, ecol = offset_to_line_col(line_starts, e + 1, 0)
+    return {
+      startLine = sline,
+      startChar = scol,
+      endLine = eline,
+      endChar = ecol,
+      selectedText = needle,
+    }
   end
   for line_idx = 0, #lines - 1 do
     local line_text = lines[line_idx + 1] or ""
@@ -195,8 +367,8 @@ function M.apply_resolution(comment, match)
     comment.startChar = match.startChar
     changed = true
   end
-  if comment.endLine ~= match.startLine then
-    comment.endLine = match.startLine
+  if comment.endLine ~= match.endLine then
+    comment.endLine = match.endLine
     changed = true
   end
   if comment.endChar ~= match.endChar then

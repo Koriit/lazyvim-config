@@ -147,10 +147,26 @@ local function find_at_cursor(ctx, data)
   local col = cursor[2]
   local matches = {}
   for _, c in ipairs(data.comments or {}) do
-    if c.filePath == ctx.rel_path and c.startLine == line then
+    if c.filePath == ctx.rel_path then
+      local sl = c.startLine
+      local el = c.endLine or sl
       local sc = c.startChar or 0
       local ec = c.endChar or sc
-      if col >= sc and col <= ec then
+      local hit = false
+      if sl == el then
+        if line == sl and col >= sc and col <= ec then
+          hit = true
+        end
+      else
+        if line == sl and col >= sc then
+          hit = true
+        elseif line > sl and line < el then
+          hit = true
+        elseif line == el and col <= ec then
+          hit = true
+        end
+      end
+      if hit then
         table.insert(matches, c)
       end
     end
@@ -244,11 +260,11 @@ local function visual_range()
   local start_col, end_col
 
   if mode == "V" then
-    -- Line-visual: span the full first line (multi-line gets collapsed below).
+    -- Line-visual: span from col 0 of first line through end-of-line of last line.
     start_col = 0
     end_col = line_byte_length(bufnr, b[2])
   elseif mode == "\22" then
-    -- Block-visual: treat as multi-line full-line span; downstream collapses to first line.
+    -- Block-visual: treat as multi-line full-line span (col 0..end of last line).
     start_col = 0
     end_col = line_byte_length(bufnr, b[2])
   else
@@ -274,17 +290,23 @@ local function selection_text(bufnr, sr, sc, er, ec)
   if sr == er then
     return string.sub(lines[1], sc + 1, ec)
   end
-  return string.sub(lines[1], sc + 1)
+  local parts = {}
+  -- First line: from sc to end of line.
+  table.insert(parts, string.sub(lines[1], sc + 1))
+  -- Middle lines: whole line.
+  for i = 2, #lines - 1 do
+    table.insert(parts, lines[i] or "")
+  end
+  -- Last line: from start to ec (ec is 0-indexed exclusive).
+  table.insert(parts, string.sub(lines[#lines] or "", 1, ec))
+  return table.concat(parts, "\n")
 end
+
+-- Exposed for headless unit tests; intentionally underscore-prefixed.
+M._test_selection_text = selection_text
 
 local function create_from_visual(ctx)
   local sr, sc, er, ec = visual_range()
-  if sr ~= er then
-    notify("sidenote: collapsed multi-line selection to first line", vim.log.levels.INFO)
-    er = sr
-    local first_line = vim.api.nvim_buf_get_lines(ctx.bufnr, sr, sr + 1, false)[1] or ""
-    ec = #first_line
-  end
   local text = selection_text(ctx.bufnr, sr, sc, er, ec)
   if #text < 3 then
     notify("sidenote: selection too short, min 3 chars", vim.log.levels.WARN)
@@ -293,7 +315,13 @@ local function create_from_visual(ctx)
 
   local data = storage.load(ctx.data_path)
   for _, c in ipairs(data.comments) do
-    if c.filePath == ctx.rel_path and c.startLine == sr and c.startChar == sc and c.endChar == ec then
+    if
+      c.filePath == ctx.rel_path
+      and c.startLine == sr
+      and c.startChar == sc
+      and c.endLine == er
+      and c.endChar == ec
+    then
       M.edit_comment(ctx, c)
       return
     end
@@ -310,7 +338,7 @@ local function create_from_visual(ctx)
           filePath = ctx.rel_path,
           startLine = sr,
           startChar = sc,
-          endLine = sr,
+          endLine = er,
           endChar = ec,
           selectedText = text,
           selectedTextHash = anchor.sha256(text),

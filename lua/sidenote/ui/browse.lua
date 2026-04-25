@@ -190,17 +190,30 @@ local function render_preview(ctx)
     vim.api.nvim_buf_clear_namespace(ctx.buf, ns, 0, -1)
     local line_count = vim.api.nvim_buf_line_count(ctx.buf)
     local anchor_row0 = resolved.startLine
+    local end_row0 = resolved.endLine or anchor_row0
     if anchor_row0 >= 0 and anchor_row0 < line_count then
+      if end_row0 < anchor_row0 then
+        end_row0 = anchor_row0
+      end
+      if end_row0 > line_count - 1 then
+        end_row0 = line_count - 1
+      end
       pcall(vim.api.nvim_buf_set_extmark, ctx.buf, ns, anchor_row0, 0, {
         virt_lines = virt_lines,
         virt_lines_above = true,
       })
-      local file_line = file_lines[anchor_row0 + 1] or ""
-      local line_len = #file_line
-      local s_col = math.min(resolved.startChar or 0, line_len)
-      local e_col = math.min(math.max(resolved.endChar or s_col, s_col), line_len)
+      local start_line_text = file_lines[anchor_row0 + 1] or ""
+      local end_line_text = file_lines[end_row0 + 1] or ""
+      local s_col = math.min(resolved.startChar or 0, #start_line_text)
+      local raw_e_col = resolved.endChar or s_col
+      local e_col
+      if end_row0 == anchor_row0 then
+        e_col = math.min(math.max(raw_e_col, s_col), #start_line_text)
+      else
+        e_col = math.min(math.max(raw_e_col, 0), #end_line_text)
+      end
       pcall(vim.api.nvim_buf_set_extmark, ctx.buf, ns, anchor_row0, s_col, {
-        end_row = anchor_row0,
+        end_row = end_row0,
         end_col = e_col,
         hl_group = "SideNoteHighlight",
         hl_mode = "combine",
