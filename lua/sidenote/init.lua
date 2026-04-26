@@ -742,6 +742,23 @@ function M.setup(opts)
     pattern = "*.md",
     callback = on_buf_file_post,
   })
+  -- External markdown edit auto-reloaded by nvim: re-resolve anchors against
+  -- the freshly-loaded buffer state, persist, re-render. Same payload as save.
+  vim.api.nvim_create_autocmd("FileChangedShellPost", {
+    group = group,
+    pattern = "*.md",
+    callback = on_buf_write_post,
+  })
+  -- External data.json edit (e.g. Obsidian added/edited a note while nvim was
+  -- backgrounded): re-read storage and re-render every loaded markdown buffer.
+  -- Also triggers a :checktime so any externally-modified buffers reload.
+  vim.api.nvim_create_autocmd({ "FocusGained", "BufEnter" }, {
+    group = group,
+    callback = function()
+      pcall(vim.cmd, "checktime")
+      refresh_all_markdown_buffers()
+    end,
+  })
   vim.api.nvim_create_autocmd("ColorScheme", {
     group = group,
     callback = function()
