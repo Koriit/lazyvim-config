@@ -3,6 +3,32 @@
 Personal Neovim configuration based on [LazyVim](https://github.com/LazyVim/LazyVim),
 extended with locally-developed plugins (`lua/sidenote/`, `lua/mdtable/`, ...).
 
+## Markdown toolchain
+
+### Prerequisites
+
+- **Rust + cargo** — required to build `rumdl` from crates.io (see Lua toolchain section below).
+
+### Install
+
+```bash
+cargo install rumdl
+```
+
+### Why these choices
+
+| Tool | Role | Notes |
+|---|---|---|
+| `rumdl` | formatter | Rust-based Markdown formatter; used by conform.nvim for `markdown` files. |
+
+### Verify
+
+```bash
+rumdl --version
+```
+
+---
+
 ## Lua toolchain
 
 The plugins in this repo are authored, formatted, linted, and tested with the
